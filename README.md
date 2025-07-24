@@ -347,6 +347,7 @@ See our [contribution guidelines](CONTRIBUTING.md) for more information.
 ## License
 
 Copyright 2025 Jeremy Tregunna
+
 Copyright 2025 Sreram K (sreramk360@gmail.com)
 
 Licensed under the Apache License, Version 2.0 (the "License");
