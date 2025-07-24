@@ -26,8 +26,8 @@ type CompactionCoordinatorOptions struct {
 	CompactionInterval int64
 }
 
-// DefaultCompactionCoordinator is the default implementation of CompactionCoordinator
-type DefaultCompactionCoordinator struct {
+// CompactionCoordinator is the default implementation of CompactionCoordinator
+type CompactionCoordinator struct {
 	// Configuration
 	cfg *config.Config
 
@@ -63,7 +63,7 @@ type DefaultCompactionCoordinator struct {
 }
 
 // NewCompactionCoordinator creates a new compaction coordinator
-func NewCompactionCoordinator(cfg *config.Config, sstableDir string, options CompactionCoordinatorOptions) *DefaultCompactionCoordinator {
+func NewCompactionCoordinator(cfg *config.Config, sstableDir string, options CompactionCoordinatorOptions) *CompactionCoordinator {
 	// Set defaults for any missing components
 	if options.FileTracker == nil {
 		options.FileTracker = NewFileTracker()
@@ -85,7 +85,7 @@ func NewCompactionCoordinator(cfg *config.Config, sstableDir string, options Com
 		options.CompactionInterval = 1 // Default to 1 second
 	}
 
-	return &DefaultCompactionCoordinator{
+	return &CompactionCoordinator{
 		cfg:                   cfg,
 		sstableDir:            sstableDir,
 		strategy:              options.Strategy,
@@ -100,7 +100,7 @@ func NewCompactionCoordinator(cfg *config.Config, sstableDir string, options Com
 }
 
 // Start begins background compaction
-func (c *DefaultCompactionCoordinator) Start() error {
+func (c *CompactionCoordinator) Start() error {
 	c.compactingMu.Lock()
 	defer c.compactingMu.Unlock()
 
@@ -123,7 +123,7 @@ func (c *DefaultCompactionCoordinator) Start() error {
 }
 
 // Stop halts background compaction
-func (c *DefaultCompactionCoordinator) Stop() error {
+func (c *CompactionCoordinator) Stop() error {
 	c.compactingMu.Lock()
 	defer c.compactingMu.Unlock()
 
@@ -140,7 +140,7 @@ func (c *DefaultCompactionCoordinator) Stop() error {
 }
 
 // TrackTombstone adds a key to the tombstone tracker
-func (c *DefaultCompactionCoordinator) TrackTombstone(key []byte) {
+func (c *CompactionCoordinator) TrackTombstone(key []byte) {
 	// Track the tombstone in our tracker
 	if c.tombstoneManager != nil {
 		c.tombstoneManager.AddTombstone(key)
@@ -149,7 +149,7 @@ func (c *DefaultCompactionCoordinator) TrackTombstone(key []byte) {
 
 // ForcePreserveTombstone marks a tombstone for special handling during compaction
 // This is primarily for testing purposes, to ensure specific tombstones are preserved
-func (c *DefaultCompactionCoordinator) ForcePreserveTombstone(key []byte) {
+func (c *CompactionCoordinator) ForcePreserveTombstone(key []byte) {
 	if c.tombstoneManager != nil {
 		c.tombstoneManager.ForcePreserveTombstone(key)
 	}
@@ -157,18 +157,18 @@ func (c *DefaultCompactionCoordinator) ForcePreserveTombstone(key []byte) {
 
 // MarkFileObsolete marks a file as obsolete (can be deleted)
 // For backward compatibility with tests
-func (c *DefaultCompactionCoordinator) MarkFileObsolete(path string) {
+func (c *CompactionCoordinator) MarkFileObsolete(path string) {
 	c.fileTracker.MarkFileObsolete(path)
 }
 
 // CleanupObsoleteFiles removes files that are no longer needed
 // For backward compatibility with tests
-func (c *DefaultCompactionCoordinator) CleanupObsoleteFiles() error {
+func (c *CompactionCoordinator) CleanupObsoleteFiles() error {
 	return c.fileTracker.CleanupObsoleteFiles()
 }
 
 // compactionWorker runs the compaction loop
-func (c *DefaultCompactionCoordinator) compactionWorker() {
+func (c *CompactionCoordinator) compactionWorker() {
 	// Ensure a minimum interval of 1 second
 	interval := c.compactionInterval
 	if interval <= 0 {
@@ -210,7 +210,7 @@ func (c *DefaultCompactionCoordinator) compactionWorker() {
 }
 
 // runCompactionCycle performs a single compaction cycle
-func (c *DefaultCompactionCoordinator) runCompactionCycle() error {
+func (c *CompactionCoordinator) runCompactionCycle() error {
 	// Reload SSTables to get fresh information
 	if err := c.strategy.LoadSSTables(); err != nil {
 		return fmt.Errorf("failed to load SSTables: %w", err)
@@ -269,7 +269,7 @@ func (c *DefaultCompactionCoordinator) runCompactionCycle() error {
 }
 
 // TriggerCompaction forces a compaction cycle
-func (c *DefaultCompactionCoordinator) TriggerCompaction() error {
+func (c *CompactionCoordinator) TriggerCompaction() error {
 	c.compactingMu.Lock()
 	defer c.compactingMu.Unlock()
 
@@ -277,7 +277,7 @@ func (c *DefaultCompactionCoordinator) TriggerCompaction() error {
 }
 
 // CompactRange triggers compaction on a specific key range
-func (c *DefaultCompactionCoordinator) CompactRange(minKey, maxKey []byte) error {
+func (c *CompactionCoordinator) CompactRange(minKey, maxKey []byte) error {
 	c.compactingMu.Lock()
 	defer c.compactingMu.Unlock()
 
@@ -291,7 +291,7 @@ func (c *DefaultCompactionCoordinator) CompactRange(minKey, maxKey []byte) error
 }
 
 // GetCompactionStats returns statistics about the compaction state
-func (c *DefaultCompactionCoordinator) GetCompactionStats() map[string]interface{} {
+func (c *CompactionCoordinator) GetCompactionStats() map[string]interface{} {
 	c.resultsMu.RLock()
 	defer c.resultsMu.RUnlock()
 

@@ -1,3 +1,17 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package main
 
 import (
@@ -7,10 +21,12 @@ import (
 	"net"
 	"time"
 
-	"github.com/KevoDB/kevo/pkg/engine/interfaces"
-	"github.com/KevoDB/kevo/pkg/engine/transaction"
+	"github.com/KevoDB/kevo/pkg/common"
+	"github.com/KevoDB/kevo/pkg/engine"
+	"github.com/KevoDB/kevo/pkg/grpc/interceptors"
 	grpcservice "github.com/KevoDB/kevo/pkg/grpc/service"
 	"github.com/KevoDB/kevo/pkg/replication"
+	"github.com/KevoDB/kevo/pkg/sessreg"
 	pb "github.com/KevoDB/kevo/proto/kevo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -19,8 +35,10 @@ import (
 
 // Server represents the Kevo server
 type Server struct {
-	eng                interfaces.Engine
-	txRegistry         interfaces.TxRegistry
+	eng *engine.EngineFacade
+
+	sessreg *sessreg.SessionRegistry
+	// txRegistry         *txregold.TransactionRegistry
 	listener           net.Listener
 	grpcServer         *grpc.Server
 	kevoService        *grpcservice.KevoServiceServer
@@ -29,11 +47,11 @@ type Server struct {
 }
 
 // NewServer creates a new server instance
-func NewServer(eng interfaces.Engine, config Config) *Server {
+func NewServer(eng *engine.EngineFacade, config Config) *Server {
 	return &Server{
-		eng:        eng,
-		txRegistry: transaction.NewRegistry(),
-		config:     config,
+		eng: eng,
+		// txRegistry: txregold.NewRegistry(),
+		config: config,
 	}
 }
 
@@ -43,7 +61,7 @@ func (s *Server) Start() error {
 	var err error
 	s.listener, err = net.Listen("tcp", s.config.ListenAddr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", s.config.ListenAddr, err)
+		return fmt.Errorf("failed to listen on %s: %s", s.config.ListenAddr, err)
 	}
 
 	fmt.Printf("Listening on %s\n", s.config.ListenAddr)
@@ -62,7 +80,7 @@ func (s *Server) Start() error {
 		if s.config.TLSCertFile != "" && s.config.TLSKeyFile != "" {
 			cert, err := tls.LoadX509KeyPair(s.config.TLSCertFile, s.config.TLSKeyFile)
 			if err != nil {
-				return fmt.Errorf("failed to load TLS certificate: %w", err)
+				return fmt.Errorf("failed to load TLS certificate: %s", err)
 			}
 			tlsConfig.Certificates = []tls.Certificate{cert}
 		}
@@ -85,10 +103,25 @@ func (s *Server) Start() error {
 		PermitWithoutStream: true,
 	}
 
+	// for verifying if the session was indeed created
+	// by the server, and not the client.
+	secret, err := common.GenerateRandom256Bit()
+	if err != nil {
+		return err
+	}
+
+	sreg := sessreg.NewSessionRegistryWithDefaults()
+	s.sessreg = sreg
+	err = sreg.StartAutoExpiry()
+	if err != nil {
+		return err
+	}
+
 	serverOpts = append(serverOpts,
 		grpc.KeepaliveParams(kaProps),
 		grpc.KeepaliveEnforcementPolicy(kaPolicy),
-	)
+		grpc.UnaryInterceptor(interceptors.CreateServerUnaryInterceptor(secret, sreg)),
+		grpc.StreamInterceptor(interceptors.CreateServerStreamInterceptor(secret, sreg)))
 
 	// Create gRPC server with options
 	s.grpcServer = grpc.NewServer(serverOpts...)
@@ -108,12 +141,12 @@ func (s *Server) Start() error {
 		// Create the replication manager
 		s.replicationManager, err = replication.NewManager(s.eng, replicationConfig)
 		if err != nil {
-			return fmt.Errorf("failed to create replication manager: %w", err)
+			return fmt.Errorf("failed to create replication manager: %s", err)
 		}
 
 		// Start the replication service
 		if err := s.replicationManager.Start(); err != nil {
-			return fmt.Errorf("failed to start replication: %w", err)
+			return fmt.Errorf("failed to start replication: %s", err)
 		}
 
 		fmt.Printf("Replication started in %s mode\n", s.config.ReplicationMode)
@@ -135,7 +168,7 @@ func (s *Server) Start() error {
 			s.config.ReplicationEnabled, s.replicationManager == nil)
 	}
 
-	s.kevoService = grpcservice.NewKevoServiceServer(s.eng, s.txRegistry, repManager)
+	s.kevoService = grpcservice.NewKevoServiceServer(s.eng, sreg, repManager)
 	pb.RegisterKevoServiceServer(s.grpcServer, s.kevoService)
 
 	fmt.Println("gRPC server initialized")
@@ -188,18 +221,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Shut down the listener if it's still open
 	if s.listener != nil {
 		if err := s.listener.Close(); err != nil {
-			return fmt.Errorf("failed to close listener: %w", err)
+			return fmt.Errorf("failed to close listener: %s", err)
 		}
 	}
 
-	// Clean up any active transactions
-	if registry, ok := s.txRegistry.(interface {
-		GracefulShutdown(context.Context) error
-	}); ok {
-		if err := registry.GracefulShutdown(ctx); err != nil {
-			return fmt.Errorf("failed to shutdown transaction registry: %w", err)
-		}
-	}
+	s.sessreg.Close()
 
 	return nil
 }

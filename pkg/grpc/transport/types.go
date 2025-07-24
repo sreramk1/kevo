@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KevoDB/kevo/pkg/transport"
 	pb "github.com/KevoDB/kevo/proto/kevo"
 	"google.golang.org/grpc"
 )
@@ -14,7 +13,7 @@ import (
 type GRPCConnection struct {
 	conn     *grpc.ClientConn
 	address  string
-	metrics  *transport.ExtendedMetricsCollector
+	metrics  *ExtendedMetricsCollector
 	lastUsed time.Time
 	mu       sync.RWMutex
 	reqCount int
@@ -55,14 +54,14 @@ func (c *GRPCConnection) Address() string {
 }
 
 // Status returns the current connection status
-func (c *GRPCConnection) Status() transport.ConnectionStatus {
+func (c *GRPCConnection) Status() ConnectionStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	// Check the connection state
 	isConnected := c.conn != nil
 
-	return transport.ConnectionStatus{
+	return ConnectionStatus{
 		Connected:    isConnected,
 		LastActivity: c.lastUsed,
 		ErrorCount:   c.errCount,

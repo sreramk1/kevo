@@ -1,3 +1,16 @@
+// Copyright 2025 Jeremy Tregunna
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package compaction
 
 import (
@@ -60,6 +73,14 @@ func (e *DefaultCompactionExecutor) CompactFiles(task *CompactionTask) ([]string
 	var entriesInCurrentFile int
 
 	// Function to create a new output file
+	// This function does the following:
+	// 1. If currentWriter is not nil, it indicates there was a previous
+	//    write operation. This is appended into outputFiles.
+	// 2. Increments the outputFileSequence for each filename
+	//    it generates.
+	// 3. Generates the new filename based on modified outputFileSequence
+	//    (modified during the last time the function was called).
+	// 4. Opens and assigns the new writer to currentWriter.
 	createNewOutputFile := func() error {
 		if currentWriter != nil {
 			if err := currentWriter.Finish(); err != nil {

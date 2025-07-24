@@ -4,18 +4,18 @@ import (
 	"fmt"
 
 	"github.com/KevoDB/kevo/pkg/common/log"
-	"github.com/KevoDB/kevo/pkg/engine/interfaces"
+	"github.com/KevoDB/kevo/pkg/engine"
 	"github.com/KevoDB/kevo/pkg/wal"
 )
 
 // EngineApplier implements the WALEntryApplier interface for applying
 // WAL entries to a database engine.
 type EngineApplier struct {
-	engine interfaces.Engine
+	engine *engine.EngineFacade
 }
 
 // NewEngineApplier creates a new engine applier
-func NewEngineApplier(engine interfaces.Engine) *EngineApplier {
+func NewEngineApplier(engine *engine.EngineFacade) *EngineApplier {
 	return &EngineApplier{
 		engine: engine,
 	}
@@ -29,9 +29,11 @@ func (e *EngineApplier) Apply(entry *wal.Entry) error {
 
 	// Check if engine is in read-only mode
 	isReadOnly := false
-	if checker, ok := e.engine.(interface{ IsReadOnly() bool }); ok {
-		isReadOnly = checker.IsReadOnly()
-	}
+	isReadOnly = e.engine.IsReadOnly()
+
+	// if checker, ok := e.engine.(interface{ IsReadOnly() bool }); ok {
+	// 	isReadOnly = checker.IsReadOnly()
+	// }
 
 	// Handle application based on read-only status and operation type
 	if isReadOnly {
@@ -48,66 +50,70 @@ func (e *EngineApplier) applyInReadOnlyMode(entry *wal.Entry) error {
 	switch entry.Type {
 	case wal.OpTypePut:
 		// Try internal interface first
-		if putter, ok := e.engine.(interface{ PutInternal(key, value []byte) error }); ok {
-			return putter.PutInternal(entry.Key, entry.Value)
-		}
+		return e.engine.PutInternal(entry.Key, entry.Value)
+		// if putter, ok := e.engine.(interface{ PutInternal(key, value []byte) error }); ok {
+		// 	return putter.PutInternal(entry.Key, entry.Value)
+		// }
 
-		// Try temporarily disabling read-only mode
-		if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
-			setter.SetReadOnly(false)
-			err := e.engine.Put(entry.Key, entry.Value)
-			setter.SetReadOnly(true)
-			return err
-		}
+		// // Try temporarily disabling read-only mode
+		// if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
+		// 	setter.SetReadOnly(false)
+		// 	err := e.engine.Put(entry.Key, entry.Value)
+		// 	setter.SetReadOnly(true)
+		// 	return err
+		// }
 
-		// Fall back to normal operation which may fail
-		return e.engine.Put(entry.Key, entry.Value)
+		// // Fall back to normal operation which may fail
+		// return e.engine.Put(entry.Key, entry.Value)
 
 	case wal.OpTypeDelete:
-		// Try internal interface first
-		if deleter, ok := e.engine.(interface{ DeleteInternal(key []byte) error }); ok {
-			return deleter.DeleteInternal(entry.Key)
-		}
+		return e.engine.DeleteInternal(entry.Key)
+		// // Try internal interface first
+		// if deleter, ok := e.engine.(interface{ DeleteInternal(key []byte) error }); ok {
+		// 	return deleter.DeleteInternal(entry.Key)
+		// }
 
-		// Try temporarily disabling read-only mode
-		if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
-			setter.SetReadOnly(false)
-			err := e.engine.Delete(entry.Key)
-			setter.SetReadOnly(true)
-			return err
-		}
+		// // Try temporarily disabling read-only mode
+		// if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
+		// 	setter.SetReadOnly(false)
+		// 	err := e.engine.Delete(entry.Key)
+		// 	setter.SetReadOnly(true)
+		// 	return err
+		// }
 
-		// Fall back to normal operation which may fail
-		return e.engine.Delete(entry.Key)
+		// // Fall back to normal operation which may fail
+		// return e.engine.Delete(entry.Key)
 
 	case wal.OpTypeBatch:
-		// Try internal interface first
-		if batcher, ok := e.engine.(interface {
-			ApplyBatchInternal(entries []*wal.Entry) error
-		}); ok {
-			return batcher.ApplyBatchInternal([]*wal.Entry{entry})
-		}
+		return e.engine.ApplyBatchInternal([]*wal.Entry{entry})
+		// // Try internal interface first
+		// if batcher, ok := e.engine.(interface {
+		// 	ApplyBatchInternal(entries []*wal.Entry) error
+		// }); ok {
+		// 	return batcher.ApplyBatchInternal([]*wal.Entry{entry})
+		// }
 
-		// Try temporarily disabling read-only mode
-		if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
-			setter.SetReadOnly(false)
-			err := e.engine.ApplyBatch([]*wal.Entry{entry})
-			setter.SetReadOnly(true)
-			return err
-		}
+		// // Try temporarily disabling read-only mode
+		// if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
+		// 	setter.SetReadOnly(false)
+		// 	err := e.engine.ApplyBatch([]*wal.Entry{entry})
+		// 	setter.SetReadOnly(true)
+		// 	return err
+		// }
 
-		// Fall back to normal operation which may fail
-		return e.engine.ApplyBatch([]*wal.Entry{entry})
+		// // Fall back to normal operation which may fail
+		// return e.engine.ApplyBatch([]*wal.Entry{entry})
 
 	case wal.OpTypeMerge:
-		// Handle merge as a put operation for compatibility
-		if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
-			setter.SetReadOnly(false)
-			err := e.engine.Put(entry.Key, entry.Value)
-			setter.SetReadOnly(true)
-			return err
-		}
-		return e.engine.Put(entry.Key, entry.Value)
+		return e.engine.PutInternal(entry.Key, entry.Value)
+		// // Handle merge as a put operation for compatibility
+		// if setter, ok := e.engine.(interface{ SetReadOnly(bool) }); ok {
+		// 	setter.SetReadOnly(false)
+		// 	err := e.engine.Put(entry.Key, entry.Value)
+		// 	setter.SetReadOnly(true)
+		// 	return err
+		// }
+		// return e.engine.Put(entry.Key, entry.Value)
 
 	default:
 		return fmt.Errorf("unsupported WAL entry type: %d", entry.Type)

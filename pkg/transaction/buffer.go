@@ -131,8 +131,21 @@ func (b *Buffer) Clear() {
 	b.operations = make(map[string]*Operation)
 }
 
-// Size returns the number of operations in the buffer
-func (b *Buffer) Size() int {
+func (b *Buffer) SizeInBytes() int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	var size int64 = 0
+	for k, v := range b.operations {
+		size += int64(len(k))
+		size += int64(len(v.Key))
+		size += int64(len(v.Value))
+		size += int64(1) // for v.IsDelete
+	}
+	return size
+}
+
+// NumberOfQueuedOperations returns the number of operations in the buffer
+func (b *Buffer) NumberOfQueuedOperations() int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 

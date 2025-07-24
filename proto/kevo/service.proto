@@ -4,7 +4,12 @@ package kevo;
 
 option go_package = "github.com/jeremytregunna/kevo/pkg/grpc/proto;proto";
 
+// protoc -I=. --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative service.proto
 service KevoService {
+
+  
+  rpc RenewSession (RenewSessionRequest) returns (RenewSessionResponse);
+
   // Key-Value Operations
   rpc Get(GetRequest) returns (GetResponse);
   rpc Put(PutRequest) returns (PutResponse);
@@ -21,18 +26,21 @@ service KevoService {
   rpc CommitTransaction(CommitTransactionRequest) returns (CommitTransactionResponse);
   rpc RollbackTransaction(RollbackTransactionRequest) returns (RollbackTransactionResponse);
   
-  // Transaction Operations within an active transaction
-  rpc TxGet(TxGetRequest) returns (TxGetResponse);
-  rpc TxPut(TxPutRequest) returns (TxPutResponse);
-  rpc TxDelete(TxDeleteRequest) returns (TxDeleteResponse);
-  rpc TxScan(TxScanRequest) returns (stream TxScanResponse);
-  
   // Administrative Operations
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse);
   rpc Compact(CompactRequest) returns (CompactResponse);
   
   // Replication and Topology Operations
   rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
+}
+
+
+message RenewSessionRequest {
+  // string transaction_id = 1;
+}
+
+message RenewSessionResponse {
+  // bool ok = 1;
 }
 
 // Basic message types
@@ -48,26 +56,26 @@ message GetResponse {
 message PutRequest {
   bytes key = 1;
   bytes value = 2;
-  bool sync = 3;
+  // bool sync = 3;
 }
 
 message PutResponse {
-  bool success = 1;
+  // bool success = 1;
 }
 
 message DeleteRequest {
   bytes key = 1;
-  bool sync = 2;
+  // bool sync = 2;
 }
 
 message DeleteResponse {
-  bool success = 1;
+  // bool success = 1;
 }
 
 // Batch operations
 message BatchWriteRequest {
   repeated Operation operations = 1;
-  bool sync = 2;
+  // bool sync = 2;
 }
 
 message Operation {
@@ -98,73 +106,80 @@ message ScanResponse {
   bytes value = 2;
 }
 
+enum TransactionMode {
+	TX_UNKNOWN               = 0;
+	TX_READ_ONLY             = 1;
+	TX_READ_WRITE_SERIALIZED = 2;
+	TX_READ_COMMITTED        = 3; 
+}
+
 // Transaction operations
 message BeginTransactionRequest {
-  bool read_only = 1;
+  TransactionMode tx_mode = 1;
 }
 
 message BeginTransactionResponse {
-  string transaction_id = 1;
+  // string transaction_id = 1;
 }
 
 message CommitTransactionRequest {
-  string transaction_id = 1;
+  // string transaction_id = 1;
 }
 
 message CommitTransactionResponse {
-  bool success = 1;
+  // bool success = 1;
 }
 
 message RollbackTransactionRequest {
-  string transaction_id = 1;
+  // string transaction_id = 1;
 }
 
 message RollbackTransactionResponse {
-  bool success = 1;
+  // bool success = 1;
 }
 
-message TxGetRequest {
-  string transaction_id = 1;
-  bytes key = 2;
-}
+//message TxGetRequest {
+//  string transaction_id = 1;
+//  bytes key = 2;
+//}
 
-message TxGetResponse {
-  bytes value = 1;
-  bool found = 2;
-}
+//message TxGetResponse {
+//  bytes value = 1;
+//  bool found = 2;
+//}
 
-message TxPutRequest {
-  string transaction_id = 1;
-  bytes key = 2;
-  bytes value = 3;
-}
+//message TxPutRequest {
+//  string transaction_id = 1;
+//  bytes key = 2;
+//  bytes value = 3;
+//}
 
-message TxPutResponse {
-  bool success = 1;
-}
+//message TxPutResponse {
+//  bool success = 1;
+//}
 
-message TxDeleteRequest {
-  string transaction_id = 1;
-  bytes key = 2;
-}
+//message TxDeleteRequest {
+//  string transaction_id = 1;
+//  bytes key = 2;
+//}
 
-message TxDeleteResponse {
-  bool success = 1;
-}
+//message TxDeleteResponse {
+//  bool success = 1;
+//}
 
-message TxScanRequest {
-  string transaction_id = 1;
-  bytes prefix = 2;
-  bytes suffix = 6;
-  bytes start_key = 3;
-  bytes end_key = 4;
-  int32 limit = 5;
-}
+//message TxScanRequest {
+//  string transaction_id = 1;
+//  bytes prefix = 2;
+//  bytes suffix = 6;
+//  bytes start_key = 3;
+//  bytes end_key = 4;
+//  int32 limit = 5;
+//}
 
-message TxScanResponse {
-  bytes key = 1;
-  bytes value = 2;
-}
+//message TxScanResponse {
+//  bytes key = 1;
+//  bytes value = 2;
+//}
 
 // Administrative operations
 message GetStatsRequest {}

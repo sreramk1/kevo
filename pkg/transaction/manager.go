@@ -1,22 +1,40 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package transaction
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 
+	"github.com/KevoDB/kevo/pkg/common"
+	"github.com/KevoDB/kevo/pkg/engine/storage"
+	"github.com/KevoDB/kevo/pkg/locks"
 	"github.com/KevoDB/kevo/pkg/stats"
 )
 
-// Manager implements the TransactionManager interface
-type Manager struct {
-	// Storage backend for transaction operations
-	storage StorageBackend
+// TransactionManager implements the TransactionManager interface
+type TransactionManager struct {
 
 	// Statistics collector
 	stats stats.Collector
 
-	// Transaction isolation lock
-	txLock sync.RWMutex
+	// sharedTxState is shared across all
+	// transactions
+	sharedTxState *SharedTxState
 
 	// Transaction counters
 	txStarted   atomic.Uint64
@@ -25,58 +43,65 @@ type Manager struct {
 }
 
 // NewManager creates a new transaction manager
-func NewManager(storage StorageBackend, stats stats.Collector) *Manager {
-	return &Manager{
-		storage: storage,
-		stats:   stats,
+func NewManager(storage *storage.StorageManager, stats stats.Collector) *TransactionManager {
+	return &TransactionManager{
+		// storage: storage,
+		stats: stats,
+		sharedTxState: &SharedTxState{
+			locks:   locks.NewLocksWithDefaults(),
+			txLock:  sync.RWMutex{},
+			storage: storage,
+		},
 	}
 }
 
+var ErrUnknownTransactionMode = errors.New("unknown transaction mode")
+
 // BeginTransaction starts a new transaction
-func (m *Manager) BeginTransaction(readOnly bool) (Transaction, error) {
+func (m *TransactionManager) BeginTransaction(mode TransactionMode) (*Transaction, error) {
 	// Track transaction start
 	if m.stats != nil {
 		m.stats.TrackOperation(stats.OpTxBegin)
 	}
 	m.txStarted.Add(1)
 
-	// Convert to transaction mode
-	mode := ReadWrite
-	if readOnly {
-		mode = ReadOnly
+	id, err := common.GenerateRandom256Bit()
+	if err != nil {
+		return nil, err
 	}
 
 	// Create a new transaction
-	tx := &TransactionImpl{
-		storage: m.storage,
-		mode:    mode,
-		buffer:  NewBuffer(),
-		rwLock:  &m.txLock,
-		stats:   m,
+	tx := &Transaction{
+		id:            common.NewReadOnly(id),
+		mode:          common.NewReadOnly(mode),
+		buffer:        NewBuffer(),
+		sharedTxState: m.sharedTxState, // &m.txLock,
+		stats:         m,
 	}
 
 	// Set transaction as active
-	tx.active.Store(true)
+	tx.active.Set(true)
 
 	// Acquire appropriate lock
-	if mode == ReadOnly {
-		m.txLock.RLock()
-		tx.hasReadLock.Store(true)
-	} else {
-		m.txLock.Lock()
-		tx.hasWriteLock.Store(true)
+	switch mode {
+	case ReadWriteSerialized:
+		m.sharedTxState.AcquireSerializeLock()
+	case WriteReadCommitted, ReadOnly:
+		m.sharedTxState.AcquireNonSerializeLock()
+		if mode == WriteReadCommitted {
+			tx.sharedTxState.locks.RegisterTx(tx.ID(), func() {
+				tx.rollbackSafeForRegisterTxLocked()
+			})
+		}
+	default:
+		return nil, ErrUnknownTransactionMode
 	}
 
 	return tx, nil
 }
 
-// GetRWLock returns the transaction isolation lock
-func (m *Manager) GetRWLock() *sync.RWMutex {
-	return &m.txLock
-}
-
 // IncrementTxCompleted increments the completed transaction counter
-func (m *Manager) IncrementTxCompleted() {
+func (m *TransactionManager) IncrementTxCompleted() {
 	m.txCompleted.Add(1)
 
 	// Track the commit operation
@@ -86,7 +111,7 @@ func (m *Manager) IncrementTxCompleted() {
 }
 
 // IncrementTxAborted increments the aborted transaction counter
-func (m *Manager) IncrementTxAborted() {
+func (m *TransactionManager) IncrementTxAborted() {
 	m.txAborted.Add(1)
 
 	// Track the rollback operation
@@ -96,8 +121,8 @@ func (m *Manager) IncrementTxAborted() {
 }
 
 // GetTransactionStats returns transaction statistics
-func (m *Manager) GetTransactionStats() map[string]interface{} {
-	stats := make(map[string]interface{})
+func (m *TransactionManager) GetTransactionStats() map[string]interface{} {
+	stats := make(map[string]any)
 
 	stats["tx_started"] = m.txStarted.Load()
 	stats["tx_completed"] = m.txCompleted.Load()

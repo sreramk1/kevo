@@ -262,7 +262,7 @@ func runReadBenchmarkForTuning(e *engine.EngineFacade, duration time.Duration, v
 			idx := opsCount % numKeys
 			key := keys[idx]
 
-			val, err := e.Get(key)
+			val, _, err := e.Get(key)
 			if err == engine.ErrEngineClosed {
 				goto benchmarkEnd
 			}
@@ -402,7 +402,7 @@ func runMixedBenchmarkForTuning(e *engine.EngineFacade, duration time.Duration, 
 				// Read operation - use mod of i % max key to avoid out of range
 				keyIndex := i % keyCounter
 				key := []byte(fmt.Sprintf("tune-key-%010d", keyIndex))
-				_, err := e.Get(key)
+				_, _, err := e.Get(key)
 				if err == engine.ErrEngineClosed {
 					goto benchmarkEnd
 				}

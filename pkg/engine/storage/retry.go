@@ -1,81 +1,43 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package storage
 
 import (
-	"math/rand"
-	"time"
-
+	"github.com/KevoDB/kevo/pkg/common/retry"
 	"github.com/KevoDB/kevo/pkg/wal"
 )
 
-// RetryConfig defines parameters for retry operations
-type RetryConfig struct {
-	MaxRetries     int           // Maximum number of retries
-	InitialBackoff time.Duration // Initial backoff duration
-	MaxBackoff     time.Duration // Maximum backoff duration
-}
-
-// DefaultRetryConfig returns default retry configuration
-func DefaultRetryConfig() *RetryConfig {
-	return &RetryConfig{
-		MaxRetries:     3,
-		InitialBackoff: 5 * time.Millisecond,
-		MaxBackoff:     50 * time.Millisecond,
-	}
-}
-
 // RetryOnWALRotating retries the operation if it fails with ErrWALRotating
-func (m *Manager) RetryOnWALRotating(operation func() error) error {
-	config := DefaultRetryConfig()
-	return m.RetryWithConfig(operation, config, isWALRotating)
+func RetryOnWALRotating(operation func() error) error {
+	r := retry.DefaultRetryConfig()
+	return retry.RetryWithConfig(r, operation, isWALRotating)
 }
 
 // RetryWithSequence retries the operation if it fails with ErrWALRotating
 // and returns the sequence number
-func (m *Manager) RetryWithSequence(operation func() (uint64, error)) (uint64, error) {
-	config := DefaultRetryConfig()
+func RetryWithSequence(operation func() (uint64, error)) (uint64, error) {
+	r := retry.DefaultRetryConfig()
 	var seq uint64
 
-	err := m.RetryWithConfig(func() error {
+	err := retry.RetryWithConfig(r, func() error {
 		var opErr error
 		seq, opErr = operation()
 		return opErr
-	}, config, isWALRotating)
+	}, isWALRotating)
 
 	return seq, err
-}
-
-// RetryWithConfig retries an operation with the given configuration
-func (m *Manager) RetryWithConfig(operation func() error, config *RetryConfig, isRetryable func(error) bool) error {
-	backoff := config.InitialBackoff
-
-	for i := 0; i <= config.MaxRetries; i++ {
-		// Attempt the operation
-		err := operation()
-		if err == nil {
-			return nil
-		}
-
-		// Check if we should retry
-		if !isRetryable(err) || i == config.MaxRetries {
-			return err
-		}
-
-		// Add some jitter to the backoff
-		jitter := time.Duration(rand.Int63n(int64(backoff / 10)))
-		backoff = backoff + jitter
-
-		// Wait before retrying
-		time.Sleep(backoff)
-
-		// Increase backoff for next attempt, but cap it
-		backoff = 2 * backoff
-		if backoff > config.MaxBackoff {
-			backoff = config.MaxBackoff
-		}
-	}
-
-	// Should never get here, but just in case
-	return nil
 }
 
 // isWALRotating checks if the error is due to WAL rotation or closure

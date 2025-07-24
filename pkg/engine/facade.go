@@ -1,3 +1,17 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package engine
 
 import (
@@ -10,15 +24,15 @@ import (
 	"github.com/KevoDB/kevo/pkg/common/iterator"
 	"github.com/KevoDB/kevo/pkg/config"
 	"github.com/KevoDB/kevo/pkg/engine/compaction"
-	"github.com/KevoDB/kevo/pkg/engine/interfaces"
 	"github.com/KevoDB/kevo/pkg/engine/storage"
-	"github.com/KevoDB/kevo/pkg/engine/transaction"
 	"github.com/KevoDB/kevo/pkg/stats"
+	"github.com/KevoDB/kevo/pkg/transaction"
 	"github.com/KevoDB/kevo/pkg/wal"
 )
 
 // Ensure EngineFacade implements the Engine interface
-var _ interfaces.Engine = (*EngineFacade)(nil)
+// var _ interfaces.Engine = (*EngineFacade)(nil)
+// var _ interfaces.TransactionManager = (*EngineFacade)(nil)
 
 // Using existing errors defined in engine.go
 
@@ -29,14 +43,19 @@ type EngineFacade struct {
 	dataDir string
 
 	// Core components
-	storage    interfaces.StorageManager
-	txManager  interfaces.TransactionManager
-	compaction interfaces.CompactionManager
+	storage    *storage.StorageManager
+	txManager  *transaction.TransactionManager
+	compaction *compaction.CompactionManager
 	stats      stats.Collector
 
 	// State
 	closed   atomic.Bool
 	readOnly atomic.Bool // Flag to indicate if the engine is in read-only mode (for replicas)
+}
+
+// GetTransactionStats implements interfaces.TransactionManager.
+func (e *EngineFacade) GetTransactionStats() map[string]interface{} {
+	panic("unimplemented")
 }
 
 // We keep the Engine name used in legacy code, but redirect it to our new implementation
@@ -110,6 +129,10 @@ func NewEngineFacade(dataDir string) (*EngineFacade, error) {
 	return facade, nil
 }
 
+func (e *EngineFacade) ReloadSSTables() error {
+	return e.storage.ReloadSSTables()
+}
+
 // Put adds a key-value pair to the database
 func (e *EngineFacade) Put(key, value []byte) error {
 	if e.closed.Load() {
@@ -173,9 +196,9 @@ func (e *EngineFacade) PutInternal(key, value []byte) error {
 }
 
 // Get retrieves the value for the given key
-func (e *EngineFacade) Get(key []byte) ([]byte, error) {
+func (e *EngineFacade) Get(key []byte) (val []byte, found bool, err error) {
 	if e.closed.Load() {
-		return nil, ErrEngineClosed
+		return nil, false, ErrEngineClosed
 	}
 
 	// Track the operation start
@@ -185,7 +208,7 @@ func (e *EngineFacade) Get(key []byte) ([]byte, error) {
 	start := time.Now()
 
 	// Delegate to storage component
-	value, err := e.storage.Get(key)
+	value, found, err := e.storage.Get(key)
 
 	latencyNs := uint64(time.Since(start).Nanoseconds())
 	e.stats.TrackOperationWithLatency(stats.OpGet, latencyNs)
@@ -193,13 +216,11 @@ func (e *EngineFacade) Get(key []byte) ([]byte, error) {
 	// Track bytes read
 	if err == nil {
 		e.stats.TrackBytes(false, uint64(len(key)+len(value)))
-	} else if errors.Is(err, ErrKeyNotFound) {
-		// Not really an error, just a miss
 	} else {
 		e.stats.TrackError("get_error")
 	}
 
-	return value, err
+	return value, found, err
 }
 
 // Delete removes a key from the database
@@ -275,26 +296,26 @@ func (e *EngineFacade) DeleteInternal(key []byte) error {
 }
 
 // IsDeleted returns true if the key exists and is marked as deleted
-func (e *EngineFacade) IsDeleted(key []byte) (bool, error) {
-	if e.closed.Load() {
-		return false, ErrEngineClosed
-	}
+// func (e *EngineFacade) IsDeleted(key []byte) (bool, error) {
+// 	if e.closed.Load() {
+// 		return false, ErrEngineClosed
+// 	}
 
-	// Track operation
-	e.stats.TrackOperation(stats.OpGet) // Using OpGet since it's a read operation
+// 	// Track operation
+// 	e.stats.TrackOperation(stats.OpGet) // Using OpGet since it's a read operation
 
-	// Track operation latency
-	start := time.Now()
-	isDeleted, err := e.storage.IsDeleted(key)
-	latencyNs := uint64(time.Since(start).Nanoseconds())
-	e.stats.TrackOperationWithLatency(stats.OpGet, latencyNs)
+// 	// Track operation latency
+// 	start := time.Now()
+// 	isDeleted, err := e.storage.IsDeleted(key)
+// 	latencyNs := uint64(time.Since(start).Nanoseconds())
+// 	e.stats.TrackOperationWithLatency(stats.OpGet, latencyNs)
 
-	if err != nil && !errors.Is(err, ErrKeyNotFound) {
-		e.stats.TrackError("is_deleted_error")
-	}
+// 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
+// 		e.stats.TrackError("is_deleted_error")
+// 	}
 
-	return isDeleted, err
-}
+// 	return isDeleted, err
+// }
 
 // GetIterator returns an iterator over the entire keyspace
 func (e *EngineFacade) GetIterator() (iterator.Iterator, error) {
@@ -333,39 +354,22 @@ func (e *EngineFacade) GetRangeIterator(startKey, endKey []byte) (iterator.Itera
 }
 
 // BeginTransaction starts a new transaction with the given read-only flag
-func (e *EngineFacade) BeginTransaction(readOnly bool) (interfaces.Transaction, error) {
+func (e *EngineFacade) BeginTransaction(mode transaction.TransactionMode) (*transaction.Transaction, error) {
 	if e.closed.Load() {
 		return nil, ErrEngineClosed
 	}
 
 	// Force read-only mode if engine is in read-only mode
 	if e.readOnly.Load() {
-		readOnly = true
+		mode = transaction.ReadOnly
 	}
 
 	// Track the operation start
 	e.stats.TrackOperation(stats.OpTxBegin)
 
-	// Check if we have a registered transaction creator for legacy compatibility
-	creator := GetRegisteredTransactionCreator()
-	if creator != nil {
-		// For backward compatibility with existing code that might be using the legacy transaction system
-		// Try to use the registered creator
-		legacyTx, err := CreateTransactionWithCreator(e, readOnly)
-		if err == nil {
-			// Track that we successfully created a transaction
-			e.stats.TrackOperation(stats.OpTxBegin)
-			// We need to adapt between the legacy and new interfaces
-			// Both have the same methods, so we can use type assertion safely if we're
-			// sure the LegacyTransaction also implements interfaces.Transaction
-			return legacyTx.(interfaces.Transaction), nil
-		}
-		// If legacy creator fails, fall back to the new implementation
-	}
-
 	// Track operation latency
 	start := time.Now()
-	tx, err := e.txManager.BeginTransaction(readOnly)
+	tx, err := e.txManager.BeginTransaction(mode)
 	latencyNs := uint64(time.Since(start).Nanoseconds())
 	e.stats.TrackOperationWithLatency(stats.OpTxBegin, latencyNs)
 
@@ -561,7 +565,7 @@ func (e *EngineFacade) GetStats() map[string]interface{} {
 }
 
 // GetTransactionManager returns the transaction manager
-func (e *EngineFacade) GetTransactionManager() interfaces.TransactionManager {
+func (e *EngineFacade) GetTransactionManager() *transaction.TransactionManager {
 	return e.txManager
 }
 

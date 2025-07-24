@@ -1,3 +1,17 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package compaction
 
 import (
@@ -7,14 +21,14 @@ import (
 
 	"github.com/KevoDB/kevo/pkg/compaction"
 	"github.com/KevoDB/kevo/pkg/config"
-	"github.com/KevoDB/kevo/pkg/engine/interfaces"
+	"github.com/KevoDB/kevo/pkg/interfaces"
 	"github.com/KevoDB/kevo/pkg/stats"
 )
 
-// Manager implements the interfaces.CompactionManager interface
-type Manager struct {
+// CompactionManager
+type CompactionManager struct {
 	// Core compaction coordinator from pkg/compaction
-	coordinator compaction.CompactionCoordinator
+	coordinator *compaction.CompactionCoordinator
 
 	// Configuration and paths
 	cfg        *config.Config
@@ -28,7 +42,7 @@ type Manager struct {
 }
 
 // NewManager creates a new compaction manager
-func NewManager(cfg *config.Config, sstableDir string, statsCollector stats.Collector) (*Manager, error) {
+func NewManager(cfg *config.Config, sstableDir string, statsCollector stats.Collector) (*CompactionManager, error) {
 	// Create compaction coordinator options
 	options := compaction.CompactionCoordinatorOptions{
 		// Use defaults for CompactionStrategy and CompactionExecutor
@@ -39,7 +53,7 @@ func NewManager(cfg *config.Config, sstableDir string, statsCollector stats.Coll
 	// Create the compaction coordinator
 	coordinator := compaction.NewCompactionCoordinator(cfg, sstableDir, options)
 
-	return &Manager{
+	return &CompactionManager{
 		coordinator: coordinator,
 		cfg:         cfg,
 		sstableDir:  sstableDir,
@@ -48,7 +62,7 @@ func NewManager(cfg *config.Config, sstableDir string, statsCollector stats.Coll
 }
 
 // Start begins background compaction
-func (m *Manager) Start() error {
+func (m *CompactionManager) Start() error {
 	// Track the operation
 	m.stats.TrackOperation(stats.OpCompact)
 
@@ -68,7 +82,7 @@ func (m *Manager) Start() error {
 }
 
 // Stop halts background compaction
-func (m *Manager) Stop() error {
+func (m *CompactionManager) Stop() error {
 	// If not started, nothing to do
 	if !m.started.Load() {
 		return nil
@@ -93,7 +107,7 @@ func (m *Manager) Stop() error {
 }
 
 // TriggerCompaction forces a compaction cycle
-func (m *Manager) TriggerCompaction() error {
+func (m *CompactionManager) TriggerCompaction() error {
 	// If not started, can't trigger compaction
 	if !m.started.Load() {
 		return fmt.Errorf("compaction manager not started")
@@ -116,7 +130,7 @@ func (m *Manager) TriggerCompaction() error {
 }
 
 // CompactRange triggers compaction on a specific key range
-func (m *Manager) CompactRange(startKey, endKey []byte) error {
+func (m *CompactionManager) CompactRange(startKey, endKey []byte) error {
 	// If not started, can't trigger compaction
 	if !m.started.Load() {
 		return fmt.Errorf("compaction manager not started")
@@ -143,7 +157,7 @@ func (m *Manager) CompactRange(startKey, endKey []byte) error {
 }
 
 // TrackTombstone adds a key to the tombstone tracker
-func (m *Manager) TrackTombstone(key []byte) {
+func (m *CompactionManager) TrackTombstone(key []byte) {
 	// Forward to the coordinator
 	m.coordinator.TrackTombstone(key)
 
@@ -152,20 +166,16 @@ func (m *Manager) TrackTombstone(key []byte) {
 }
 
 // ForcePreserveTombstone marks a tombstone for special handling
-func (m *Manager) ForcePreserveTombstone(key []byte) {
+func (m *CompactionManager) ForcePreserveTombstone(key []byte) {
 	// Forward to the coordinator
-	if coordinator, ok := m.coordinator.(interface {
-		ForcePreserveTombstone(key []byte)
-	}); ok {
-		coordinator.ForcePreserveTombstone(key)
-	}
+	m.coordinator.ForcePreserveTombstone(key)
 
 	// Track bytes processed
 	m.stats.TrackBytes(false, uint64(len(key)))
 }
 
 // GetCompactionStats returns statistics about the compaction state
-func (m *Manager) GetCompactionStats() map[string]interface{} {
+func (m *CompactionManager) GetCompactionStats() map[string]interface{} {
 	// Get stats from the coordinator
 	stats := m.coordinator.GetCompactionStats()
 
@@ -184,4 +194,4 @@ func (m *Manager) GetCompactionStats() map[string]interface{} {
 }
 
 // Ensure Manager implements the CompactionManager interface
-var _ interfaces.CompactionManager = (*Manager)(nil)
+var _ interfaces.CompactionManager = (*CompactionManager)(nil)

@@ -1,3 +1,54 @@
+# Extension Introduced:
+
+*The original Kevo project strictly follows the single-writer model and does not support transaction isolation. In this extension, the key-value store supports multiple concurrent transactional writes (synchronized in batches when being written to the disk) and introduces significant architectural changes, without making any noticeable changes to the lower level API (which includes replication, compaction and other features). Supported transaction-isolation levels: (1) `READ COMMITTED`, (2) `READ ONLY`, (3) `SERIALIZED`.*
+
+*The current state of this extension should only be treated as a proof-of-concept, since there are lot of bugs to be fixed and edge cases to be tested.*
+
+## Summary of the changes made:
+**NOTE: Many critical bugs were fixed in the original Kevo repository after this fork was created, but those fixes have not been incorporated into this repository.** 
+
+1. Implements the following transactions: SERIALIZED, READ COMMITTED and READ ONLY.
+2. Unlike the original implementation of Kevo, this one allows multiple transactions to run simultaneously. **Changes are synchronized with locks, and this also detects and resolves deadlocks.**
+3. The CLI does not directly interact with a locally created database. Instead, it tries to first connect with the server instance, and the CLI commands are translated to gRPC requests which are then sent to the server.
+4. Runs in two modes: 
+    1. Server mode: `go run ./cmd/kevo -server db/`
+    2. Client mode: `go run ./cmd/kevo -client`
+
+    The client attempts to connect with the default endpoint, `localhost:50051` or any other specified endpoint specified with the flag `--endpoint`. Use the flag `--address` for changing the default listen address (which is also `localhost:50051`) in server mode.
+5. Within a transaction, all keys associated with the values that are modified are locked until the transaction commits or rollbacks.
+6. `SERIALIZED` transaction strictly serializes all modifications across transactions, guaranteeing a consistent view at the expense of having only one transaction execute at a time.
+7. Non-transactional commands are also implicitly wrapped within a transaction to allow the additionally introduced transactional rules to be enforced.
+
+
+## Example use (demonstrating deadlock detection and resolution): 
+
+**Note: This repository does not include bug fixes introduced to the main Kevo repository after this fork was created. As a consequence, a bug that prevents correct reloading of data written with bulk-writes (executed by the storage layer) still exists in this repository. Therefore, re-loading from the WAL during startup causes written data to be ignored since this modification primarily relies on bulk-writes.**
+
+1. Open three terminals (`T1`, `T2`, `T3`) from within the project's root directory.
+
+2. Start the server in `T1` by executing `go run ./cmd/kevo -server db/`
+
+3. Connect to the server from `T2` and `T3` by executing `go run ./cmd/kevo -client` from them.
+
+4. Now, execute the following from `T2` and `T3`:
+
+    1. From `T2` run: `BEGIN READ COMMITTED`.
+    2. From `T3` run: `BEGIN READ COMMITTED`.
+    3. From `T2` run: `PUT x y`. Note: `x` is the key and `y` is the value.
+    4. From `T3` run: `PUT y x`.
+    5. From `T2` run: `PUT y z1`. Running this would cause `T2` to block, since the key  `y` was locked by `T3`.
+    6. From `T3` run: `PUT x z2`. This also blocks, since `T2` has already locked `x`.
+    7. Now, since the above leads to a deadlock, one or more of the blocking transactions will be terminated.
+
+
+## Tasks to Improve Stability:
+*I may not resume working on this project for sometime.*
+1. Incorporate the bug fixes introduced in the original project.
+2. Introduce robust integration tests with benchmarking.
+3. Introduce `GET-FOR-UPDATE`. This must work similar to `SELECT...FOR UPDATE`, holding locks on all fields that are read as if it was a write operation.
+4. Introduce `REPEATABLE READ` isolation, which would rely on a unique serial-number assigned to every operation ever introduce, which must be strictly increasing. This will be needed in addition to the record-level locks introduced in this repository.
+5. Optimize `SERIALIZED` isolation. Currently, this blocks all concurrent transactions and strictly allows only one transaction to execute at any given time, making this strictly pessimistic. In the future, we could modify this to be partially optimistic by not blocking transactions that apply to disjoint set of records in the database. So, instead of strict serialization, certain transactions could exit upon "serialization-failures".
+
 # Kevo
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/KevoDB/kevo)](https://goreportcard.com/report/github.com/KevoDB/kevo)
@@ -296,6 +347,7 @@ See our [contribution guidelines](CONTRIBUTING.md) for more information.
 ## License
 
 Copyright 2025 Jeremy Tregunna
+Copyright 2025 Sreram K (sreramk360@gmail.com)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

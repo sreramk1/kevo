@@ -1,3 +1,17 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package storage
 
 import (
@@ -12,16 +26,12 @@ import (
 
 	"github.com/KevoDB/kevo/pkg/common/iterator"
 	"github.com/KevoDB/kevo/pkg/config"
-	"github.com/KevoDB/kevo/pkg/engine/interfaces"
 	engineIterator "github.com/KevoDB/kevo/pkg/engine/iterator"
 	"github.com/KevoDB/kevo/pkg/memtable"
 	"github.com/KevoDB/kevo/pkg/sstable"
 	"github.com/KevoDB/kevo/pkg/stats"
 	"github.com/KevoDB/kevo/pkg/wal"
 )
-
-// Ensure Manager implements the interfaces.StorageManager interface
-var _ interfaces.StorageManager = (*Manager)(nil)
 
 const (
 	// SSTable filename format: level_sequence_timestamp.sst
@@ -31,11 +41,15 @@ const (
 // Common errors
 var (
 	ErrStorageClosed = errors.New("storage is closed")
-	ErrKeyNotFound   = errors.New("key not found")
+	// ErrKeyNotFound   = errors.New("key not found")
 )
 
-// Manager implements the interfaces.StorageManager interface
-type Manager struct {
+// var _ interfaces.StorageManager = (*StorageManager)(nil)
+// var _ interfaces.Storage = (*StorageManager)(nil)
+// var _ interfaces.StorageBackend = (*StorageManager)(nil)
+
+// StorageManager implements the interfaces.StorageManager interface
+type StorageManager struct {
 	// Configuration and paths
 	cfg        *config.Config
 	dataDir    string
@@ -67,7 +81,7 @@ type Manager struct {
 }
 
 // NewManager creates a new storage manager
-func NewManager(cfg *config.Config, statsCollector stats.Collector) (*Manager, error) {
+func NewManager(cfg *config.Config, statsCollector stats.Collector) (*StorageManager, error) {
 	if cfg == nil {
 		return nil, errors.New("config cannot be nil")
 	}
@@ -111,7 +125,7 @@ func NewManager(cfg *config.Config, statsCollector stats.Collector) (*Manager, e
 	// Create the MemTable pool
 	memTablePool := memtable.NewMemTablePool(cfg)
 
-	m := &Manager{
+	m := &StorageManager{
 		cfg:          cfg,
 		dataDir:      dataDir,
 		sstableDir:   sstableDir,
@@ -141,8 +155,16 @@ func NewManager(cfg *config.Config, statsCollector stats.Collector) (*Manager, e
 	return m, nil
 }
 
+func (m *StorageManager) PauseStorage() {
+	m.mu.Lock()
+}
+
+func (m *StorageManager) ResumeStorage() {
+	m.mu.Unlock()
+}
+
 // Put adds a key-value pair to the database
-func (m *Manager) Put(key, value []byte) error {
+func (m *StorageManager) Put(key, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -181,16 +203,19 @@ func (m *Manager) Put(key, value []byte) error {
 	}
 
 	// Execute with retry mechanism
-	return m.RetryOnWALRotating(operation)
+	return RetryOnWALRotating(operation)
 }
 
-// Get retrieves the value for the given key
-func (m *Manager) Get(key []byte) ([]byte, error) {
+// Get retrieves a value for the given key
+// Returns true for found if the value exists.
+// This does not return an error if the key was not
+// found
+func (m *StorageManager) Get(key []byte) (val []byte, found bool, err error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	if m.closed.Load() {
-		return nil, ErrStorageClosed
+		return nil, false, ErrStorageClosed
 	}
 
 	// Check the MemTablePool (active + immutables)
@@ -198,9 +223,9 @@ func (m *Manager) Get(key []byte) ([]byte, error) {
 		// The key was found, but check if it's a deletion marker
 		if val == nil {
 			// This is a deletion marker - the key exists but was deleted
-			return nil, ErrKeyNotFound
+			return nil, false, nil //ErrKeyNotFound
 		}
-		return val, nil
+		return val, true, nil
 	}
 
 	// Check the SSTables (searching from newest to oldest)
@@ -224,18 +249,18 @@ func (m *Manager) Get(key []byte) ([]byte, error) {
 		// Check if this is a tombstone
 		if iter.IsTombstone() {
 			// Found a tombstone, so this key is definitely deleted
-			return nil, ErrKeyNotFound
+			return nil, false, nil // ErrKeyNotFound
 		}
 
 		// Found a non-tombstone value for this key
-		return iter.Value(), nil
+		return iter.Value(), true, nil
 	}
 
-	return nil, ErrKeyNotFound
+	return nil, false, nil //ErrKeyNotFound
 }
 
 // Delete removes a key from the database
-func (m *Manager) Delete(key []byte) error {
+func (m *StorageManager) Delete(key []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -274,11 +299,11 @@ func (m *Manager) Delete(key []byte) error {
 	}
 
 	// Execute with retry mechanism
-	return m.RetryOnWALRotating(operation)
+	return RetryOnWALRotating(operation)
 }
 
 // IsDeleted returns true if the key exists and is marked as deleted
-func (m *Manager) IsDeleted(key []byte) (bool, error) {
+func (m *StorageManager) IsDeleted(key []byte) (bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -311,11 +336,11 @@ func (m *Manager) IsDeleted(key []byte) (bool, error) {
 	}
 
 	// Key not found at all
-	return false, ErrKeyNotFound
+	return false, nil
 }
 
 // GetIterator returns an iterator over the entire keyspace
-func (m *Manager) GetIterator() (iterator.Iterator, error) {
+func (m *StorageManager) GetIterator() (iterator.Iterator, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -332,7 +357,7 @@ func (m *Manager) GetIterator() (iterator.Iterator, error) {
 }
 
 // GetRangeIterator returns an iterator limited to a specific key range
-func (m *Manager) GetRangeIterator(startKey, endKey []byte) (iterator.Iterator, error) {
+func (m *StorageManager) GetRangeIterator(startKey, endKey []byte) (iterator.Iterator, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -349,7 +374,7 @@ func (m *Manager) GetRangeIterator(startKey, endKey []byte) (iterator.Iterator, 
 }
 
 // ApplyBatch atomically applies a batch of operations
-func (m *Manager) ApplyBatch(entries []*wal.Entry) error {
+func (m *StorageManager) ApplyBatch(entries []*wal.Entry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -398,11 +423,11 @@ func (m *Manager) ApplyBatch(entries []*wal.Entry) error {
 	}
 
 	// Execute with retry mechanism
-	return m.RetryOnWALRotating(operation)
+	return RetryOnWALRotating(operation)
 }
 
 // FlushMemTables flushes all immutable MemTables to disk
-func (m *Manager) FlushMemTables() error {
+func (m *StorageManager) FlushMemTables() error {
 	m.flushMu.Lock()
 	defer m.flushMu.Unlock()
 
@@ -455,17 +480,17 @@ func (m *Manager) FlushMemTables() error {
 }
 
 // GetMemTableSize returns the current size of all memtables
-func (m *Manager) GetMemTableSize() uint64 {
+func (m *StorageManager) GetMemTableSize() uint64 {
 	return uint64(m.memTablePool.TotalSize())
 }
 
 // IsFlushNeeded returns true if a flush is needed
-func (m *Manager) IsFlushNeeded() bool {
+func (m *StorageManager) IsFlushNeeded() bool {
 	return m.memTablePool.IsFlushNeeded()
 }
 
 // GetSSTables returns a list of SSTable filenames
-func (m *Manager) GetSSTables() []string {
+func (m *StorageManager) GetSSTables() []string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -477,7 +502,7 @@ func (m *Manager) GetSSTables() []string {
 }
 
 // ReloadSSTables reloads all SSTables from disk
-func (m *Manager) ReloadSSTables() error {
+func (m *StorageManager) ReloadSSTables() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -519,7 +544,7 @@ func (m *Manager) ReloadSSTables() error {
 }
 
 // RotateWAL creates a new WAL file and closes the old one
-func (m *Manager) RotateWAL() error {
+func (m *StorageManager) RotateWAL() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -527,7 +552,7 @@ func (m *Manager) RotateWAL() error {
 }
 
 // rotateWAL is the internal implementation of RotateWAL
-func (m *Manager) rotateWAL() error {
+func (m *StorageManager) rotateWAL() error {
 	// Create a new WAL first before closing the old one
 	newWAL, err := wal.NewWAL(m.cfg, m.walDir)
 	if err != nil {
@@ -552,7 +577,7 @@ func (m *Manager) rotateWAL() error {
 }
 
 // GetStorageStats returns storage-specific statistics
-func (m *Manager) GetStorageStats() map[string]interface{} {
+func (m *StorageManager) GetStorageStats() map[string]interface{} {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -567,7 +592,7 @@ func (m *Manager) GetStorageStats() map[string]interface{} {
 }
 
 // Close closes the storage manager
-func (m *Manager) Close() error {
+func (m *StorageManager) Close() error {
 	// First set the closed flag - use atomic operation to prevent race conditions
 	if m.closed.Swap(true) {
 		return nil // Already closed
@@ -589,7 +614,7 @@ func (m *Manager) Close() error {
 }
 
 // scheduleFlush switches to a new MemTable and schedules flushing of the old one
-func (m *Manager) scheduleFlush() error {
+func (m *StorageManager) scheduleFlush() error {
 	// Get the MemTable that needs to be flushed
 	immutable := m.memTablePool.SwitchToNewMemTable()
 
@@ -608,7 +633,7 @@ func (m *Manager) scheduleFlush() error {
 }
 
 // flushMemTable flushes a MemTable to disk as an SSTable
-func (m *Manager) flushMemTable(mem *memtable.MemTable) error {
+func (m *StorageManager) flushMemTable(mem *memtable.MemTable) error {
 	// Verify the memtable has data to flush
 	if mem.ApproximateSize() == 0 {
 		return nil
@@ -698,7 +723,7 @@ func (m *Manager) flushMemTable(mem *memtable.MemTable) error {
 }
 
 // backgroundFlush runs in a goroutine and periodically flushes immutable MemTables
-func (m *Manager) backgroundFlush() {
+func (m *StorageManager) backgroundFlush() {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -729,7 +754,7 @@ func (m *Manager) backgroundFlush() {
 }
 
 // loadSSTables loads existing SSTable files from disk
-func (m *Manager) loadSSTables() error {
+func (m *StorageManager) loadSSTables() error {
 	// Get all SSTable files in the directory
 	entries, err := os.ReadDir(m.sstableDir)
 	if err != nil {
@@ -760,7 +785,7 @@ func (m *Manager) loadSSTables() error {
 }
 
 // recoverFromWAL recovers memtables from existing WAL files
-func (m *Manager) recoverFromWAL() error {
+func (m *StorageManager) recoverFromWAL() error {
 	startTime := m.stats.StartRecovery()
 
 	// Check if WAL directory exists

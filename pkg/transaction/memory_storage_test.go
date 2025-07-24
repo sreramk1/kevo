@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"bytes"
+	"errors"
 	"sort"
 	"sync"
 
@@ -21,6 +22,8 @@ func NewMemoryStorage() *MemoryStorage {
 		data: make(map[string][]byte),
 	}
 }
+
+var ErrKeyNotFound = errors.New("Key not found")
 
 // Get retrieves a value for the given key
 func (s *MemoryStorage) Get(key []byte) ([]byte, error) {

@@ -534,7 +534,7 @@ func runReadBenchmark(e *engine.EngineFacade) string {
 			idx := r.Intn(actualNumKeys)
 			key := keys[idx]
 
-			val, err := e.Get(key)
+			val, _, err := e.Get(key)
 			if err == engine.ErrEngineClosed {
 				fmt.Fprintf(os.Stderr, "Engine closed, stopping benchmark\n")
 				goto benchmarkEnd
@@ -622,7 +622,7 @@ func runRandomReadBenchmark(e *engine.EngineFacade) string {
 			idx := readRand.Intn(actualNumKeys)
 			key := keys[idx]
 
-			val, err := e.Get(key)
+			val, _, err := e.Get(key)
 			if err == engine.ErrEngineClosed {
 				fmt.Fprintf(os.Stderr, "Engine closed, stopping benchmark\n")
 				goto benchmarkEnd
@@ -940,7 +940,7 @@ func runMixedBenchmark(e *engine.EngineFacade) string {
 				idx := r.Intn(len(keys))
 				key := keys[idx]
 
-				_, err := e.Get(key)
+				_, _, err := e.Get(key)
 				if err == engine.ErrEngineClosed {
 					fmt.Fprintf(os.Stderr, "Engine closed, stopping benchmark\n")
 					goto benchmarkEnd

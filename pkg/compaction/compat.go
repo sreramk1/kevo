@@ -8,7 +8,7 @@ import (
 
 // NewCompactionManager creates a new compaction manager with the old API
 // This is kept for backward compatibility with existing code
-func NewCompactionManager(cfg *config.Config, sstableDir string) *DefaultCompactionCoordinator {
+func NewCompactionManager(cfg *config.Config, sstableDir string) *CompactionCoordinator {
 	// Create tombstone tracker with default 24-hour retention
 	tombstones := NewTombstoneTracker(24 * time.Hour)
 
@@ -32,7 +32,7 @@ func NewCompactionManager(cfg *config.Config, sstableDir string) *DefaultCompact
 }
 
 // Temporary alias types for backward compatibility
-type CompactionManager = DefaultCompactionCoordinator
+type CompactionManager = CompactionCoordinator
 type Compactor = BaseCompactionStrategy
 type TieredCompactor = TieredCompactionStrategy
 

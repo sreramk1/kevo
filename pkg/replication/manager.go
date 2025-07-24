@@ -1,3 +1,18 @@
+// Copyright 2025 Jeremy Tregunna
+// Copyright 2025 Sreram K (sreramk360@gmail.com)
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package replication implements the primary-replica replication protocol for the Kevo database.
 package replication
 
@@ -10,7 +25,7 @@ import (
 	"time"
 
 	"github.com/KevoDB/kevo/pkg/common/log"
-	"github.com/KevoDB/kevo/pkg/engine/interfaces"
+	"github.com/KevoDB/kevo/pkg/engine"
 	"github.com/KevoDB/kevo/pkg/wal"
 	proto "github.com/KevoDB/kevo/proto/kevo/replication"
 	"google.golang.org/grpc"
@@ -62,7 +77,7 @@ func DefaultManagerConfig() *ManagerConfig {
 // Manager handles the setup and management of replication
 type Manager struct {
 	config        *ManagerConfig
-	engine        interfaces.Engine
+	engine        *engine.EngineFacade
 	primary       *Primary
 	replica       *Replica
 	grpcServer    *grpc.Server
@@ -77,7 +92,7 @@ type Manager struct {
 // Manager using EngineApplier from engine_applier.go for WAL entry application
 
 // NewManager creates a new replication manager
-func NewManager(engine interfaces.Engine, config *ManagerConfig) (*Manager, error) {
+func NewManager(engine *engine.EngineFacade, config *ManagerConfig) (*Manager, error) {
 	if config == nil {
 		config = DefaultManagerConfig()
 	}
@@ -300,11 +315,12 @@ func (m *Manager) startReplica() error {
 
 	// Set read-only mode on the engine if configured
 	if m.config.ForceReadOnly {
-		if err := m.setEngineReadOnly(true); err != nil {
-			log.Warn("Failed to set engine to read-only mode: %v", err)
-		} else {
-			log.Info("Engine set to read-only mode (replica)")
-		}
+		m.setEngineReadOnly(true)
+		// if err := m.setEngineReadOnly(true); err != nil {
+		// 	log.Warn("Failed to set engine to read-only mode: %v", err)
+		// } else {
+		// 	log.Info("Engine set to read-only mode (replica)")
+		// }
 	}
 
 	// Store references
@@ -318,38 +334,46 @@ func (m *Manager) startReplica() error {
 
 // setEngineReadOnly sets the read-only mode on the engine (if supported)
 // This only affects client operations, not internal replication operations
-func (m *Manager) setEngineReadOnly(readOnly bool) error {
+func (m *Manager) setEngineReadOnly(readOnly bool) {
 	// Try to access the SetReadOnly method if available
 	// This would be engine-specific and may require interface enhancement
-	type readOnlySetter interface {
-		SetReadOnly(bool)
-	}
+	// type readOnlySetter interface {
+	// 	SetReadOnly(bool)
+	// }
 
-	if setter, ok := m.engine.(readOnlySetter); ok {
-		setter.SetReadOnly(readOnly)
-		return nil
-	}
+	m.engine.SetReadOnly(readOnly)
 
-	return fmt.Errorf("engine does not support read-only mode setting")
+	// if setter, ok := m.engine.(readOnlySetter); ok {
+	// 	setter.SetReadOnly(readOnly)
+	// 	return nil
+	// }
+
+	// return fmt.Errorf("engine does not support read-only mode setting")
 }
 
 // getWAL retrieves the WAL from the engine
 func (m *Manager) getWAL() (*wal.WAL, error) {
 	// This would be engine-specific and may require interface enhancement
 	// For now, we'll assume this is implemented via type assertion
-	type walProvider interface {
-		GetWAL() *wal.WAL
-	}
+	// type walProvider interface {
+	// 	GetWAL() *wal.WAL
+	// }
 
-	if provider, ok := m.engine.(walProvider); ok {
-		wal := provider.GetWAL()
-		if wal == nil {
-			return nil, fmt.Errorf("engine returned nil WAL")
-		}
-		return wal, nil
+	wal := m.engine.GetWAL()
+	if wal == nil {
+		return nil, fmt.Errorf("engine returned nil WAL")
 	}
+	return wal, nil
 
-	return nil, fmt.Errorf("engine does not provide WAL access")
+	// if provider, ok := m.engine.(walProvider); ok {
+	// 	wal := provider.GetWAL()
+	// 	if wal == nil {
+	// 		return nil, fmt.Errorf("engine returned nil WAL")
+	// 	}
+	// 	return wal, nil
+	// }
+
+	// return nil, fmt.Errorf("engine does not provide WAL access")
 }
 
 // createListener creates a network listener for the gRPC server

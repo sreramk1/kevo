@@ -9,8 +9,8 @@ func TestBufferBasicOperations(t *testing.T) {
 	b := NewBuffer()
 
 	// Test initial state
-	if b.Size() != 0 {
-		t.Errorf("Expected empty buffer, got size %d", b.Size())
+	if b.NumberOfQueuedOperations() != 0 {
+		t.Errorf("Expected empty buffer, got size %d", b.NumberOfQueuedOperations())
 	}
 
 	// Test Put operation
@@ -18,8 +18,8 @@ func TestBufferBasicOperations(t *testing.T) {
 	value1 := []byte("value1")
 	b.Put(key1, value1)
 
-	if b.Size() != 1 {
-		t.Errorf("Expected buffer size 1, got %d", b.Size())
+	if b.NumberOfQueuedOperations() != 1 {
+		t.Errorf("Expected buffer size 1, got %d", b.NumberOfQueuedOperations())
 	}
 
 	// Test Get operation
@@ -35,8 +35,8 @@ func TestBufferBasicOperations(t *testing.T) {
 	newValue1 := []byte("new_value1")
 	b.Put(key1, newValue1)
 
-	if b.Size() != 1 {
-		t.Errorf("Expected buffer size to remain 1 after overwrite, got %d", b.Size())
+	if b.NumberOfQueuedOperations() != 1 {
+		t.Errorf("Expected buffer size to remain 1 after overwrite, got %d", b.NumberOfQueuedOperations())
 	}
 
 	val, found = b.Get(key1)
@@ -50,8 +50,8 @@ func TestBufferBasicOperations(t *testing.T) {
 	// Test Delete operation
 	b.Delete(key1)
 
-	if b.Size() != 1 {
-		t.Errorf("Expected buffer size to remain 1 after delete, got %d", b.Size())
+	if b.NumberOfQueuedOperations() != 1 {
+		t.Errorf("Expected buffer size to remain 1 after delete, got %d", b.NumberOfQueuedOperations())
 	}
 
 	val, found = b.Get(key1)
@@ -65,8 +65,8 @@ func TestBufferBasicOperations(t *testing.T) {
 	// Test Clear operation
 	b.Clear()
 
-	if b.Size() != 0 {
-		t.Errorf("Expected empty buffer after clear, got size %d", b.Size())
+	if b.NumberOfQueuedOperations() != 0 {
+		t.Errorf("Expected empty buffer after clear, got size %d", b.NumberOfQueuedOperations())
 	}
 }
 
